@@ -2,10 +2,18 @@
 
 给 DeepSeek Harness 用的**出站代理**插件：模型请求永远直连，网页抓取 / 普通 `fetch()` / 宿主启动的子进程跟随系统代理或手动代理；代理不可用时 fail-closed，只放行应急名单里的站点。
 
+**大白话**：开代理不影响deepseek模型访问，且DSH可访问外网。
+
 - 三种模式：`system`（跟随 Windows 系统代理开关）、`manual`（手动填代理地址）、`direct`（全部直连）。
 - 代理目标每 2 秒重读一次，开关系统代理后 2~3 秒内自动重装策略，不需要重启 DSH。
 - 每 5 秒经代理做一次真实健康检查；代理挂掉后不会「悄悄全直连」，而是只放行 `emergencyDirectHosts`（默认空）。
 - 设置入口：**设置 → 通用 → 出站代理**。
+
+## 作案动机
+
+起因是用github上其他人的开源插件，老是这出bug，那出bug，还和插件市场打架。后来发现设计上也存在缺陷（Dsh仅启动时读取一次环境变量，启动后切换代理那是鸟也不鸟你哟，报用），遂决定自己写一个。
+
+<img src="./图库/我来辣.jpg" width="320">
 
 ## 它解决什么问题
 
@@ -79,6 +87,10 @@ npm pack
 
 与界面「添加插件」的差别：界面那条通道还包含 spec 读取与兼容性预检、显式确认、`selectBundle(..., true)` 显式启用以及安装后的界面重载；CLI 没有这些步骤，兼容性检查失败等场景的反馈也更弱。因此正常安装和升级仍推荐界面「添加插件」；`dsh plugin` 只作为高级用法（离线 tarball、依赖管理、排错）的说明保留。
 
+### 什么？你实在不会安装？真拿你没办法呢，那就把网址交给AI大人好了。
+
+<img src="./图库/鱼抬头.gif" width="320">
+
 ### 安装后的验证
 
 1. 模型能正常回话 → 模型直连没有被破坏。
@@ -86,6 +98,8 @@ npm pack
 3. 打开系统代理后 `web_fetch https://www.google.com/robots.txt` 返回 200；关掉系统代理后 2~5 秒内 google 直连失败、baidu 仍 200。
 4. 把系统代理指向不存在的端口（如 `127.0.0.1:9`）→ fail-closed：名单外失败，`emergencyDirectHosts` 内站点仍可直连；改回后自动恢复。
 5. 可选：Clash 连接列表里能看到 DeepSeek Harness 发往代理的连接；关掉系统代理后消失。
+
+<img src="./图库/OK.jpg" width="320">
 
 ## 升级、卸载与停用
 
@@ -98,6 +112,10 @@ npm pack
 - **Legacy 手工卸载**（没有装组合包时）：删掉 `<profile>\node_modules\dsh-outbound\`，再删掉 `cordis.patch.yml` 里的 `dsh-outbound` insert 块，重启 DSH。
 - **旧 profile（不由 pnpm 管理）**：仓库里的 `scripts/install.ps1` / `scripts/install.sh` 仅用于这种 profile 的一次性安装或修复，带 `-Legacy`（Windows）/ `--legacy`（sh）或 `DSH_LEGACY=1` 才会执行；正常安装不要用。
 - **临时停用**：设 `DSH_OUTBOUND_DISABLE=1` 后重启 DSH；或在插件页禁用该 bundle；或把 `cordis.patch.yml` 里 `dsh-outbound` 行的 `enabled` 改成 `false`。
+
+#### 你要卸载我喵？不好用吗喵？我太菜了对不起喵......
+
+<img src="./图库/区.jpg" width="320">
 
 ## 已知边界
 
