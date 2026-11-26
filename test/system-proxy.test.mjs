@@ -70,6 +70,7 @@ test('parseSystemProxyQuery tolerates a missing ProxyServer', () => {
 test('readSystemProxy accepts an injected command runner', async () => {
 	const calls = [];
 	const result = await readSystemProxy({
+		platform: 'win32',
 		exec: async (command, args, options) => {
 			calls.push({ command, args, options });
 			return { stdout: sample({ server: '127.0.0.1:7897' }) };
@@ -83,6 +84,7 @@ test('readSystemProxy accepts an injected command runner', async () => {
 
 test('readSystemProxy turns a failed command into an error result', async () => {
 	const result = await readSystemProxy({
+		platform: 'win32',
 		exec: async () => {
 			throw new Error('reg.exe: access denied');
 		}

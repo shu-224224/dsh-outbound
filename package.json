@@ -34,7 +34,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "check": "node --check lib/index.js && node --check lib/engine.js && node --check lib/client.js && node --check lib/settings.js && node --check lib/bypass.js && node --check lib/system-proxy.js && node --check lib/plan.js && node --check lib/probe.js",
     "prepublishOnly": "npm run check"
   },

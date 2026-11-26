@@ -127,7 +127,7 @@ npm pack
 ## 测试
 
 ```powershell
-node --test test/     # 44 个用例
+node --test         # 44 个用例（Node 22+ 自动发现 test/*.test.mjs）
 npm run check         # 全部 lib 文件的语法检查
 ```
 
