@@ -1,6 +1,6 @@
 {
   "name": "dsh-outbound",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Independent outbound proxy policy for DeepSeek Harness: model traffic stays direct, everything else goes through a proxy, and the proxy outage path fails closed with an explicit emergency bypass list.",
   "type": "module",
   "main": "lib/index.js",
@@ -19,12 +19,12 @@
   ],
   "engines": {
     "node": ">=22",
-    "dsh": ">=0.2.1-rc.2 <0.3.0"
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-http-proxy": ">=0.2.1-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-launch-environment": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-http-proxy": ">=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-launch-environment": ">=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0",
     "@deepseek-ai/schemastery": "~3.18.5",
     "undici": ">=7.30 <9"
   },
@@ -35,9 +35,32 @@
   },
   "scripts": {
     "test": "node --test test/",
-    "check": "node --check lib/index.js && node --check lib/engine.js && node --check lib/client.js && node --check lib/settings.js && node --check lib/bypass.js && node --check lib/system-proxy.js && node --check lib/plan.js && node --check lib/probe.js"
+    "check": "node --check lib/index.js && node --check lib/engine.js && node --check lib/client.js && node --check lib/settings.js && node --check lib/bypass.js && node --check lib/system-proxy.js && node --check lib/plan.js && node --check lib/probe.js",
+    "prepublishOnly": "npm run check"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shu-224224/dsh-outbound.git"
+  },
+  "homepage": "https://github.com/shu-224224/dsh-outbound#readme",
+  "bugs": {
+    "url": "https://github.com/shu-224224/dsh-outbound/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "proxy",
+    "outbound",
+    "network",
+    "http-proxy"
+  ],
+  "author": "shu-224224",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

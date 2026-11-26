@@ -1,11 +1,11 @@
 # dsh-outbound
 
-给 DeepSeek Harness 用的**出站代理**插件：模型请求永远直连，网页抓取 / 普通 `fetch()` / 子进程跟随系统代理或手动代理；代理不可用时 fail-closed，只放行应急名单里的站点。
+给 DeepSeek Harness 用的**出站代理**插件：模型请求永远直连，网页抓取 / 普通 `fetch()` / 宿主启动的子进程跟随系统代理或手动代理；代理不可用时 fail-closed，只放行应急名单里的站点。
 
 - 三种模式：`system`（跟随 Windows 系统代理开关）、`manual`（手动填代理地址）、`direct`（全部直连）。
-- 代理目标每 2 秒重读一次，系统代理开关变化后 2~3 秒内自动重构策略，不需要重启 DSH。
-- 每 5 秒经代理做一次真实健康检查；代理挂掉时不再进行「全部直连」，而是只放行 `emergencyDirectHosts`（默认空）。
-- 设置入口：**设置 → 通用 → 出站代理**（host 与 client 两部分都会安装）。
+- 代理目标每 2 秒重读一次，开关系统代理后 2~3 秒内自动重装策略，不需要重启 DSH。
+- 每 5 秒经代理做一次真实健康检查；代理挂掉后不会「悄悄全直连」，而是只放行 `emergencyDirectHosts`（默认空）。
+- 设置入口：**设置 → 通用 → 出站代理**。
 
 ## 它解决什么问题
 
@@ -15,132 +15,122 @@ DSH 原生只在启动时读一次代理环境变量，之后没有运行时开�
 - 代理关掉后 `web_fetch` 直接失败，不会自动回落；
 - 切换代理要改 `~/.dsh/.env` 并重启。
 
-本插件把策略装进 `@deepseek-ai/dsh-http-proxy` 的进程级 active 策略：`dsh-web-fetch-http` 每次请求都会调用 `proxyRouteFor(url)`，普通 `fetch()` 读全局 undici dispatcher，宿主启动的子进程通过导出的 `HTTP(S)_PROXY / NO_PROXY` 跟随（模型发起的命令除外，见「已知边界」）—— 所以换策略立刻生效。
+本插件把策略装进 `@deepseek-ai/dsh-http-proxy` 的进程级 active 策略：`dsh-web-fetch-http` 每次请求都会调用 `proxyRouteFor(url)`，普通 `fetch()` 读全局 undici dispatcher，宿主启动的子进程通过导出的 `HTTP(S)_PROXY` / `NO_PROXY` 跟随（模型发起的命令除外，见「已知边界」）——换策略立刻生效。
 
 ## 运行模式
 
-| 模式 | 代理来源 | 说明 |
-| --- | --- | --- |
-| `system` | Windows 注册表 `HKCU\...\Internet Settings`（即 Clash「系统代理」开关） | 严格只认系统代理，不回退到 `proxy` 字段；非 Windows 平台退回启动时的代理环境变量 |
-| `manual` | 配置里的 `proxy` | 只支持 `http://` 与 `https://`；写错或为空时按直连处理 |
-| `direct` | 无 | 全部直连 |
+| 模式 | 含义 |
+| --- | --- |
+| `system` | 只认 Windows 系统代理开关：开则用注册表里的代理，关则全部直连。**不会**退回这里填的 `proxy` |
+| `manual` | 固定使用 `proxy` 字段里的代理地址（只支持 `http://` / `https://`） |
+| `direct` | 全部直连，忽略系统代理 |
 
 ## 健康检查与失败关闭
 
-- 每 `probeIntervalMs`（默认 5000）经当前代理 `GET probeUrl`；`2xx/3xx` 以及除 `407` 外的 `4xx` 视为代理可用（说明隧道打到目标了），`5xx`、`407`、超时、连接错误视为不可用。
-- 代理不可用时 **fail-closed**：`http_proxy/https_proxy` 照发，但 `no_proxy` 并入 `emergencyDirectHosts` —— 名单内站点直连，名单外站点走一个连不上的代理（等于失败），避免真实 IP 泄露。
-- 若确实需要「代理挂了就全部直连」，把 `fallbackToDirect` 设为 `true`（会暴露真实 IP，默认关闭）。
-- 目标地址（系统代理 / manual 配置）每 `pollIntervalMs`（默认 2000）重读；目标变化会立即重判，不需要等下一次探测。
-- 模型域名（默认 `deepseek.com`）始终在 `no_proxy` 里（`keepModelDirect`）。
+- 每 `probeIntervalMs`（默认 5000ms）通过代理实际 `GET probeUrl`（默认 `https://www.gstatic.com/generate_204`）判断代理是否可用。
+- 200~499（407 除外）视为隧道可用；5xx、超时、连接错误视为不可用。
+- 代理不可用时：`fallbackToDirect: false`（默认）→ **fail-closed**，只有 `emergencyDirectHosts` 里的站点直连，其他请求报网络错误；`fallbackToDirect: true` → 全部直连（会暴露真实 IP，谨慎）。
+- 健康检查恢复后自动切回代理；关闭探测（`probeIntervalMs: 0`）时代理目标存在即视为可用。
 
 ## 配置项
 
-| 字段 | 默认值 | 说明 |
+| 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `enabled` | `true` | 关掉后恢复 DSH 启动时的原始策略 |
+| `enabled` | `true` | 总开关；`false` 时恢复启动时的直连策略 |
 | `mode` | `system` | `system` / `manual` / `direct` |
-| `proxy` | `''` | manual 模式使用的代理，如 `http://127.0.0.1:7897` |
-| `keepModelDirect` | `true` | 把 `deepseek.com` 固定放进 `no_proxy` |
-| `noProxy` | `[]` | 额外直连主机（与回环地址一起并入 `no_proxy`；不读取注册表 `ProxyOverride`） |
-| `emergencyDirectHosts` | `[]` | 代理不可用时仍直连的主机 |
-| `fallbackToDirect` | `false` | 代理不可用时是否全部直连（有 IP 泄露风险） |
+| `proxy` | `''` | `manual` 模式下的代理地址，如 `http://127.0.0.1:7890` |
+| `keepModelDirect` | `true` | 模型请求（`deepseek.com`）始终加入 `no_proxy` 直连 |
+| `noProxy` | `[]` | 额外直连主机列表，如 `["internal.example.com"]` |
+| `emergencyDirectHosts` | `[]` | 代理不可用时仍直连的站点，默认空即完全失败关闭 |
+| `fallbackToDirect` | `false` | 代理不可用时是否退回全部直连（不推荐） |
 | `probeUrl` | `https://www.gstatic.com/generate_204` | 健康检查地址 |
-| `pollIntervalMs` | `2000` | 重读代理目标的间隔，`0` 表示只在启动/配置变更时读一次 |
-| `probeIntervalMs` | `5000` | 健康检查间隔，`0` 表示关闭探测（目标存在即视为可用；目标变化仍会跟随） |
-| `probeTimeoutMs` | `2500` | 单次探测超时 |
+| `pollIntervalMs` | `2000` | 重读代理目标的周期；`0` 表示只在设置变更时重装 |
+| `probeIntervalMs` | `5000` | 健康检查周期；`0` 表示关闭探测 |
+| `probeTimeoutMs` | `2500` | 单次健康检查超时 |
 
 ## 安装
 
-前置：DeepSeek Harness 桌面版 `0.2.1-rc.2` ~ `0.2.x`（本包在 `0.2.1-rc.3` 上验证）。profile 默认位置：Windows `%USERPROFILE%\.dsh\profiles\desktop`，macOS/Linux `~/.dsh/profiles/desktop`。
+前置：DeepSeek Harness 桌面版 `>=0.2.1-rc.2 <0.3.0`（在 `0.2.1-rc.3` 上验证）；不需要另行安装依赖或构建。profile 默认位置：Windows 为 `%USERPROFILE%\.dsh\profiles\desktop`，macOS / Linux 为 `~/.dsh/profiles/desktop`。
 
-### 方式一：一键脚本（推荐）
+### 方式一：DSH 界面「添加插件」（推荐）
 
-Windows（在仓库根目录执行）：
+打开 **设置 → 插件 → 添加插件**，在对话框里填下面任意一种地址：
+
+- **本地目录**（现在就可以用）：下载本仓库 ZIP 并解压，填解压目录的绝对路径，例如 `C:\Users\you\Downloads\dsh-outbound-main`；
+- **Git 地址**（现在就可以用）：`https://github.com/shu-224224/dsh-outbound`。
+
+安装器会校验包里的 `dsh.bundle.patch`、执行 `pnpm add`、把包写进 profile 的 `dsh.profile.bundles` 并应用包内 patch，所以之后任何 `pnpm install` 都不会把它清掉。装完重启 DSH，**设置 → 通用** 出现「出站代理」即成功。
+
+> 从 Git 地址安装时，插件管理器会先做一次 `git ls-remote` 连通性检查（默认 5 秒），网络不通会失败。
+
+### 方式二：本地 tarball
+
+适合离线环境或固定版本。在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+npm pack
 ```
 
-macOS / Linux：
+然后在 **设置 → 插件 → 添加插件** 里填生成的 `dsh-outbound-0.1.0.tgz` 绝对路径，或把 tgz 放到内网再填其路径。安装逻辑同方式一（同样会注册 bundle）。
 
-```sh
-sh ./scripts/install.sh
-```
+### 关于命令行 `dsh plugin`
 
-脚本会：把插件文件复制到 `<profile>/node_modules/dsh-outbound/`，并在 `<profile>/cordis.patch.yml` 末尾追加一条 `dsh-outbound` 配置行（已存在则跳过，重复执行安全）。可选参数：`-DryRun`（只打印不写）、`-ProfileDir <路径>`、`-NoBackup`（Windows，不备份旧 patch）；macOS/Linux 用环境变量 `DSH_PROFILE_DIR=<路径>`、`DRY_RUN=1`。
+在桌面版上，`dsh plugin --profile desktop add <spec>` 会先在 profile 目录执行 pnpm（即 `pnpm add`）；成功后还会对依赖树做一次 reconcile——校验新依赖声明了 `dsh.bundle.patch`，把包写进 `dsh.profile.bundles` 并加载包内 patch（源码见 `@deepseek-ai/dsh-plugin-manager` 的 `runProfilePnpm`）。所以它也能装本地 tarball（`file:vendor/xxx.tgz`，本仓库作者就用这条路径安装过）。
 
-### 方式二：手工复制
+与界面「添加插件」的差别：界面那条通道还包含 spec 读取与兼容性预检、显式确认、`selectBundle(..., true)` 显式启用以及安装后的界面重载；CLI 没有这些步骤，兼容性检查失败等场景的反馈也更弱。因此正常安装和升级仍推荐界面「添加插件」；`dsh plugin` 只作为高级用法（离线 tarball、依赖管理、排错）的说明保留。
 
-1. 把 `lib/`、`package.json`、`README.md`、`CHANGELOG.md`、`LICENSE` 复制到 `<profile>\node_modules\dsh-outbound\`（目录不存在就手动创建）。
-2. 在 `<profile>\cordis.patch.yml` 末尾追加：
-
-```yaml
-- insert:
-    - id: dsh-outbound
-      name: dsh-outbound
-      config:
-        enabled: true
-        mode: system
-        proxy: ''
-        keepModelDirect: true
-        noProxy: []
-        emergencyDirectHosts: []
-        fallbackToDirect: false
-        probeUrl: https://www.gstatic.com/generate_204
-        pollIntervalMs: 2000
-        probeIntervalMs: 5000
-        probeTimeoutMs: 2500
-```
-
-3. 打开 **设置 → 通用**，看到「出站代理」即安装成功；没看到就**完全退出 DSH（含托盘图标）再重开**。
-
-手工方式不需要改 profile 的 `package.json`，也不需要 `pnpm install`（`@deepseek-ai/cordis`、`@deepseek-ai/dsh-http-proxy` 等模块由 DSH 宿主提供）。
-
-## 验证
+### 安装后的验证
 
 1. 模型能正常回话 → 模型直连没有被破坏。
-2. **设置 → 通用** 出现「出站代理」→ client UI 加载正常。
+2. **设置 → 通用** 出现「出站代理」。
 3. 打开系统代理后 `web_fetch https://www.google.com/robots.txt` 返回 200；关掉系统代理后 2~5 秒内 google 直连失败、baidu 仍 200。
-4. 把系统代理指向一个不存在的端口（如 `127.0.0.1:9`）→ 进入 fail-closed：名单外失败、`emergencyDirectHosts` 内站点仍可直连；改回来后自动恢复。
-5. 可选：打开系统代理后，在 Clash 的连接列表里能看到 `DeepSeek Harness` 进程发往代理的连接；关掉系统代理后这些连接消失。
+4. 把系统代理指向不存在的端口（如 `127.0.0.1:9`）→ fail-closed：名单外失败，`emergencyDirectHosts` 内站点仍可直连；改回后自动恢复。
+5. 可选：Clash 连接列表里能看到 DeepSeek Harness 发往代理的连接；关掉系统代理后消失。
 
-## 升级与卸载
+## 升级、卸载与停用
 
-- 升级（方式一 / 方式二）：重新执行安装脚本，或重新复制 `lib/` 与 `package.json`，配置行会跳过不重复；设置会保留。
-- 卸载（方式一 / 方式二）：删除 `<profile>\node_modules\dsh-outbound\`，并删掉 `cordis.patch.yml` 里的 `dsh-outbound` insert 块。
-- 临时停用：设环境变量 `DSH_OUTBOUND_DISABLE=1` 后重启 DSH；或在 `cordis.patch.yml` 的 `dsh-outbound` 行把 `enabled` 设为 `false`（配置重载后生效）。
+- **组合包安装（界面 / tarball）**：在 **设置 → 插件** 的已安装列表里升级（重新添加新版本）或卸载；配置保存在 profile 的 `cordis.patch.yml`（用户 patch 层），升级不会重置。
+- **从 Legacy 手工安装迁移**（推荐一次做完）：
+  1. 先用界面「添加插件」装上新版本；
+  2. 删掉 `cordis.patch.yml` 里旧的 `dsh-outbound` 手工 `insert` 块，避免和 bundle 自带的配置行重复；想保留自定义配置就把它改成顶层 `- id: dsh-outbound` 覆盖项；
+  3. 完全退出 DSH 再打开。
+  迁移后留下的 `node_modules\dsh-outbound\` 会被 pnpm 接管，也可手动删掉。
+- **Legacy 手工卸载**（没有装组合包时）：删掉 `<profile>\node_modules\dsh-outbound\`，再删掉 `cordis.patch.yml` 里的 `dsh-outbound` insert 块，重启 DSH。
+- **旧 profile（不由 pnpm 管理）**：仓库里的 `scripts/install.ps1` / `scripts/install.sh` 仅用于这种 profile 的一次性安装或修复，带 `-Legacy`（Windows）/ `--legacy`（sh）或 `DSH_LEGACY=1` 才会执行；正常安装不要用。
+- **临时停用**：设 `DSH_OUTBOUND_DISABLE=1` 后重启 DSH；或在插件页禁用该 bundle；或把 `cordis.patch.yml` 里 `dsh-outbound` 行的 `enabled` 改成 `false`。
 
 ## 已知边界
 
-- 只支持 HTTP(S) 代理，不支持 SOCKS（宿主 `dsh-http-proxy` 的限制）。
-- `system` 模式的注册表读取只实现了 Windows；macOS / Linux 上该模式退回启动时的代理环境变量。
-- PAC（`AutoConfigURL`）不会解析，只在日志里告警。
-- 健康检查基于单个探针地址：探针返回 5xx、超时或连接错误会被判为代理不可用（4xx 除 407 外视为隧道可用），可以换 `probeUrl` 或把 `probeIntervalMs` 设为 `0`。
-- `system` 模式只读系统代理的开关与地址，不解析注册表 `ProxyOverride` 直连列表；要额外直连的主机请写进 `noProxy`。
-- 代理地址不要写带用户名密码的 URL（会明文写进配置文件）。
-- 模型发起的命令（bash / 子代理 / workflow 等）的进程环境**不包含**插件注入的 `http_proxy` / `https_proxy`——DSH 宿主有意不把代理设置交给模型代码，所以不要用终端里的 `cmd /c set` 判断插件是否生效，请用设置页和 `web_fetch` 的实际走向验证。
+- **模型请求**由宿主 Node 的全局 `fetch` 发出，走 `no_proxy` 直连；`keepModelDirect: false` 时模型请求也会跟随代理。
+- **模型发起的命令**（Agent 执行的 `bash` / `pwsh` 等）不会继承插件发布的代理环境变量，这是 DSH 的行为；需要时请在命令里自行加 `-x` / `http_proxy`。
+- **系统代理**只在 Windows 上读取注册表（`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`）；macOS / Linux 的 `system` 模式退回启动时的代理环境变量。
+- 只支持 `http://` / `https://` 代理；SOCKS 和带账号密码的代理 URL 会被拒绝。
+- `noProxy` 只接受主机名或域名后缀，`*`、CIDR 等条目会被丢弃并告警；不读取注册表的 `ProxyOverride`。
+- 注册表里配置了 PAC（`AutoConfigURL`）时只告警、不解析。
+- fail-closed 下所有非应急站点都会失败；请按需填写 `emergencyDirectHosts`（如 `["baidu.com", "bilibili.com"]`）。
 
 ## 模块结构
 
 | 文件 | 职责 |
 | --- | --- |
-| `lib/index.js` | 插件入口：配置 schema、上下文接线、启动引擎 |
-| `lib/settings.js` | 配置归一化 / 代理 URL 与主机名清洗 |
-| `lib/bypass.js` | 生成 `no_proxy`（模型直连 + 回环 + 应急名单） |
-| `lib/system-proxy.js` | 读取 Windows 系统代理（注册表，一次整键查询） |
-| `lib/plan.js` | 纯函数：根据目标与健康状态生成策略 |
-| `lib/probe.js` | 经代理的健康探测（undici ProxyAgent，复用连接池） |
-| `lib/engine.js` | 轮询 / 探测 / 安装策略的状态机（可注入时钟，便于测试） |
-| `lib/client.js` | 「设置 → 通用 → 出站代理」界面 |
-| `scripts/install.ps1`、`scripts/install.sh` | 方式一安装脚本 |
-| `test/` | 单元测试（含假时钟引擎测试） |
+| `lib/index.js` | Cordis 入口：配置 schema、目标读取、生命周期 |
+| `lib/engine.js` | 轮询 / 探测 / 重装策略的状态机 |
+| `lib/plan.js` | 由配置 + 代理目标推导出要发布的策略 |
+| `lib/bypass.js` | 组装 `no_proxy`（模型直连、回环、应急名单） |
+| `lib/probe.js` | 经代理做健康检查 |
+| `lib/system-proxy.js` | 读取 Windows 系统代理与 `ProxyOverride` |
+| `lib/settings.js` | 配置归一化与校验 |
+| `lib/client.js` | 设置页「出站代理」表单（Web 端） |
+| `scripts/install.ps1`、`scripts/install.sh` | 旧 profile 的 legacy 安装 / 修复脚本（仅升级、卸载场景） |
+| `test/` | 单元测试（配置、策略、注册表解析、引擎） |
 
 ## 测试
 
-```sh
-node --test test/
+```powershell
+node --test test/     # 44 个用例
+npm run check         # 全部 lib 文件的语法检查
 ```
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。
+[MIT](LICENSE)
